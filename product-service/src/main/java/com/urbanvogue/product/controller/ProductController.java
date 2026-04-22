@@ -33,4 +33,21 @@ public class ProductController {
         productService.deleteProduct(id);
         return "Product deleted successfully!";
     }
+
+    // This endpoint is called internally by Order Service only
+
+    @PutMapping("/{id}/reduce-stock")
+    public String reduceStock(@PathVariable Long id,
+                              @RequestParam Integer quantity) {
+        productService.reduceStock(id, quantity);
+        return "Stock updated successfully";
+    }
+
+    // Called when customer cancels an order — puts items back on shelf
+    @PutMapping("/{id}/restore-stock")
+    public String restoreStock(@PathVariable Long id,
+                               @RequestParam Integer quantity) {
+        productService.restoreStock(id, quantity);
+        return "Stock restored successfully";
+    }
 }

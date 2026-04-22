@@ -8,8 +8,10 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
+import org.springframework.web.util.UriComponentsBuilder;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -22,7 +24,6 @@ public class OrderService {
     @Autowired
     private RestTemplate restTemplate;
 
-    // Reads from application.properties
     @Value("${product.service.url}")
     private String productServiceUrl;
 
@@ -31,25 +32,29 @@ public class OrderService {
     // ─────────────────────────────────────────
     public Order placeOrder(OrderRequest request) {
 
-        // ── BUSINESS RULE 1: Username cannot be empty ──
+        // ── VALIDATION BLOCK ──
         if (request.getCustomerUsername() == null ||
                 request.getCustomerUsername().trim().isEmpty()) {
             throw new RuntimeException("Customer username is required.");
         }
 
-        // ── BUSINESS RULE 2: Order must have at least one item ──
         if (request.getItems() == null || request.getItems().isEmpty()) {
-            throw new RuntimeException("Order must contain at least one item.");
+            throw new RuntimeException(
+                    "Order must contain at least one item."
+            );
         }
 
-        // ── BUSINESS RULE 3: Validate each item ──
+        // ── STEP 1: Validate ALL items BEFORE saving anything ──
+        // We check everything first so we don't create a partial order
         for (OrderRequest.OrderItemRequest item : request.getItems()) {
+
             if (item.getQuantity() <= 0) {
                 throw new RuntimeException(
                         "Quantity for product ID " + item.getProductId() +
                                 " must be greater than zero."
                 );
             }
+
             if (item.getPriceAtPurchase() <= 0) {
                 throw new RuntimeException(
                         "Price for product ID " + item.getProductId() +
@@ -57,24 +62,21 @@ public class OrderService {
                 );
             }
 
-            // ── BUSINESS RULE 4: Verify product exists in Product Service ──
-            // This is a real inter-service call using RestTemplate
-            // It calls YOUR Product Service GET /api/products/{id}
+            // ── Verify product exists AND has enough stock ──
+            // Calls: GET http://localhost:8081/api/products/{id}
             try {
-                String url = productServiceUrl + "/api/products/" + item.getProductId();
+                String url = productServiceUrl +
+                        "/api/products/" + item.getProductId();
                 restTemplate.getForObject(url, Object.class);
-                // If product doesn't exist, Product Service returns 404
-                // RestTemplate throws exception → we catch it below
             } catch (Exception e) {
                 throw new RuntimeException(
                         "Product ID " + item.getProductId() +
-                                " does not exist in Product Service. " +
-                                "Please add it first via POST /api/products"
+                                " does not exist in Product Service."
                 );
             }
         }
 
-        // ── STEP 1: Convert DTO items to OrderItem entities ──
+        // ── STEP 2: Convert DTO → OrderItem entities ──
         List<OrderItem> orderItems = request.getItems().stream()
                 .map(itemReq -> {
                     OrderItem item = new OrderItem();
@@ -86,28 +88,64 @@ public class OrderService {
                 })
                 .collect(Collectors.toList());
 
-        // ── STEP 2: Auto-calculate total ──
-        // Total = sum of (price × quantity) for each item
+        // ── STEP 3: Auto-calculate total ──
         double total = orderItems.stream()
                 .mapToDouble(item ->
                         item.getPriceAtPurchase() * item.getQuantity()
                 )
                 .sum();
 
-        // ── STEP 3: Build the Order ──
+        // ── STEP 4: Build and save the Order ──
         Order order = new Order();
         order.setCustomerUsername(request.getCustomerUsername());
         order.setStatus("PENDING");
-        order.setTotalAmount(Math.round(total * 100.0) / 100.0); // Round to 2 decimals
+        order.setTotalAmount(Math.round(total * 100.0) / 100.0);
         order.setCreatedAt(LocalDateTime.now());
         order.setItems(orderItems);
-
-        // ── STEP 4: Link items back to order ──
-        // Required for @OneToMany bidirectional relationship
         orderItems.forEach(item -> item.setOrder(order));
 
-        // ── STEP 5: Save (CascadeType.ALL saves items too) ──
-        return orderRepository.save(order);
+        Order savedOrder = orderRepository.save(order);
+
+        // ── STEP 5: Reduce stock in Product Service ──
+        // This runs AFTER order is saved successfully
+        // If stock reduction fails, we cancel the order automatically
+        List<String> stockErrors = new ArrayList<>();
+
+        for (OrderItem item : orderItems) {
+            try {
+                // Calls: PUT /api/products/{id}/reduce-stock?quantity=2
+                String stockUrl = UriComponentsBuilder
+                        .fromHttpUrl(productServiceUrl +
+                                "/api/products/" +
+                                item.getProductId() +
+                                "/reduce-stock")
+                        .queryParam("quantity", item.getQuantity())
+                        .toUriString();
+
+                restTemplate.put(stockUrl, null);
+
+            } catch (Exception e) {
+                // Collect all stock errors
+                stockErrors.add(
+                        "Failed to reduce stock for product: " +
+                                item.getProductName() +
+                                ". Reason: " + e.getMessage()
+                );
+            }
+        }
+
+        // ── STEP 6: If any stock reduction failed, cancel the order ──
+        if (!stockErrors.isEmpty()) {
+            savedOrder.setStatus("CANCELLED");
+            orderRepository.save(savedOrder);
+            throw new RuntimeException(
+                    "Order #" + savedOrder.getId() +
+                            " cancelled due to stock issues: " +
+                            String.join(", ", stockErrors)
+            );
+        }
+
+        return savedOrder;
     }
 
     // ─────────────────────────────────────────
@@ -131,7 +169,8 @@ public class OrderService {
     // READ: All orders for a customer
     // ─────────────────────────────────────────
     public List<Order> getOrdersByCustomer(String username) {
-        List<Order> orders = orderRepository.findByCustomerUsername(username);
+        List<Order> orders = orderRepository
+                .findByCustomerUsername(username);
         if (orders.isEmpty()) {
             throw new RuntimeException(
                     "No orders found for customer: " + username
@@ -142,11 +181,9 @@ public class OrderService {
 
     // ─────────────────────────────────────────
     // UPDATE: Change order status
-    // Only valid transitions are allowed
     // ─────────────────────────────────────────
     public Order updateOrderStatus(Long id, String newStatus) {
 
-        // Validate status is a known value
         List<String> validStatuses = List.of(
                 "PENDING", "CONFIRMED", "SHIPPED", "DELIVERED", "CANCELLED"
         );
@@ -159,19 +196,15 @@ public class OrderService {
         }
 
         Order order = getOrderById(id);
-        String currentStatus = order.getStatus();
 
-        // ── BUSINESS RULE: Status can only move forward ──
-        // DELIVERED orders cannot be changed
-        if (currentStatus.equals("DELIVERED")) {
+        if (order.getStatus().equals("DELIVERED")) {
             throw new RuntimeException(
                     "Cannot change status. Order #" + id +
                             " is already DELIVERED."
             );
         }
 
-        // CANCELLED orders cannot be reactivated
-        if (currentStatus.equals("CANCELLED")) {
+        if (order.getStatus().equals("CANCELLED")) {
             throw new RuntimeException(
                     "Cannot change status. Order #" + id +
                             " is already CANCELLED."
@@ -183,22 +216,44 @@ public class OrderService {
     }
 
     // ─────────────────────────────────────────
-    // DELETE: Cancel order (PENDING only)
+    // CANCEL: Cancel order + restore stock
     // ─────────────────────────────────────────
     public String cancelOrder(Long id) {
         Order order = getOrderById(id);
 
-        // ── BUSINESS RULE: Only PENDING orders can be cancelled ──
         if (!order.getStatus().equals("PENDING")) {
             throw new RuntimeException(
                     "Cannot cancel Order #" + id +
-                            ". Current status: " + order.getStatus() +
+                            ". Status: " + order.getStatus() +
                             ". Only PENDING orders can be cancelled."
             );
         }
 
+        // ── Restore stock when order is cancelled ──
+        // When customer cancels, items go back to shelf
+        for (OrderItem item : order.getItems()) {
+            try {
+                String restoreUrl = UriComponentsBuilder
+                        .fromHttpUrl(productServiceUrl +
+                                "/api/products/" +
+                                item.getProductId() +
+                                "/restore-stock")
+                        .queryParam("quantity", item.getQuantity())
+                        .toUriString();
+
+                restTemplate.put(restoreUrl, null);
+
+            } catch (Exception e) {
+                // Log but don't fail — order still gets cancelled
+                System.err.println(
+                        "Warning: Could not restore stock for product " +
+                                item.getProductId() + ": " + e.getMessage()
+                );
+            }
+        }
+
         order.setStatus("CANCELLED");
         orderRepository.save(order);
-        return "Order #" + id + " has been successfully cancelled.";
+        return "Order #" + id + " cancelled. Stock restored.";
     }
 }

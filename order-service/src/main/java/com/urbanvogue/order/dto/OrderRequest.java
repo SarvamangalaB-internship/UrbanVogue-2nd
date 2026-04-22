@@ -3,27 +3,17 @@ package com.urbanvogue.order.dto;
 import lombok.Data;
 import java.util.List;
 
-@Data
+@Data  // ← Generates getters/setters for outer class
 public class OrderRequest {
 
-    // Must match a registered user from Auth Service
     private String customerUsername;
-
     private List<OrderItemRequest> items;
 
-    @Data
+    @Data  // ← CRITICAL: Must also be here for inner class!
     public static class OrderItemRequest {
-
-        // Must be a valid product ID from Product Service
         private Long productId;
-
-        // Copy the UPPERCASE name from Product Service
-        // e.g. "URBAN CLASSIC SNEAKERS"
         private String productName;
-
         private Integer quantity;
-
-        // Copy the price from Product Service GET response
         private Double priceAtPurchase;
     }
 

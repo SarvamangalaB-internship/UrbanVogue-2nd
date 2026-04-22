@@ -59,4 +59,47 @@ public class ProductService {
     public void deleteProduct(Long id) {
         productRepository.deleteById(id);
     }
+
+    // ADD this new method to your existing ProductService.java
+
+    public void reduceStock(Long id, Integer quantityOrdered) {
+
+        Product product = productRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException(
+                        "Product not found with id: " + id
+                ));
+
+        // ── BUSINESS RULE 1: Cannot order more than available stock ──
+        if (product.getStockQuantity() < quantityOrdered) {
+            throw new RuntimeException(
+                    "Insufficient stock for product: " + product.getName() +
+                            ". Available: " + product.getStockQuantity() +
+                            ", Requested: " + quantityOrdered
+            );
+        }
+
+        // ── BUSINESS RULE 2: Stock cannot go below zero ──
+        int newStock = product.getStockQuantity() - quantityOrdered;
+        if (newStock < 0) {
+            throw new RuntimeException(
+                    "Stock cannot go below zero for: " + product.getName()
+            );
+        }
+
+        // Deduct and save
+        product.setStockQuantity(newStock);
+        productRepository.save(product);
+    }
+    // Called when order is cancelled — adds stock back
+    public void restoreStock(Long id, Integer quantityToRestore) {
+        Product product = productRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException(
+                        "Product not found with id: " + id
+                ));
+
+        product.setStockQuantity(
+                product.getStockQuantity() + quantityToRestore
+        );
+        productRepository.save(product);
+    }
 }
