@@ -1,5 +1,6 @@
 package com.urbanvogue.order.service;
 
+import com.urbanvogue.order.dto.OrderItemRequest;
 import com.urbanvogue.order.dto.OrderRequest;
 import com.urbanvogue.order.model.Order;
 import com.urbanvogue.order.model.OrderItem;
@@ -46,7 +47,7 @@ public class OrderService {
 
         // ── STEP 1: Validate ALL items BEFORE saving anything ──
         // We check everything first so we don't create a partial order
-        for (OrderRequest.OrderItemRequest item : request.getItems()) {
+        for (OrderItemRequest item : request.getItems()) {
 
             if (item.getQuantity() <= 0) {
                 throw new RuntimeException(
@@ -66,7 +67,7 @@ public class OrderService {
             // Calls: GET http://localhost:8081/api/products/{id}
             try {
                 String url = productServiceUrl +
-                        "/api/products/" + item.getProductId();
+                        "/api/products/get/" + item.getProductId();
                 restTemplate.getForObject(url, Object.class);
             } catch (Exception e) {
                 throw new RuntimeException(

@@ -1,6 +1,7 @@
 package com.urbanvogue.product.controller;
 
 import com.urbanvogue.product.model.Product;
+import com.urbanvogue.product.repository.ProductRepository;
 import com.urbanvogue.product.service.ProductService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
@@ -13,6 +14,7 @@ public class ProductController {
     @Autowired
     private ProductService productService;
 
+
     @GetMapping
     public List<Product> getAll() {
         return productService.getAllProducts();
@@ -21,6 +23,11 @@ public class ProductController {
     @PostMapping
     public Product create(@RequestBody Product product) {
         return productService.addProduct(product);
+    }
+
+    @GetMapping("/get/{id}")
+    public Product getProduct(@PathVariable Long id) {
+        return productService.getProductById(id);
     }
 
     @PutMapping("/{id}")
@@ -50,4 +57,5 @@ public class ProductController {
         productService.restoreStock(id, quantity);
         return "Stock restored successfully";
     }
+
 }

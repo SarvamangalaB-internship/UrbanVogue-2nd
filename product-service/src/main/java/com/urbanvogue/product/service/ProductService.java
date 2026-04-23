@@ -18,11 +18,6 @@ public class ProductService {
         return productRepository.findAll();
     }
 
-    // READ ONE
-    public Optional<Product> getProductById(Long id) {
-        return productRepository.findById(id);
-    }
-
     // CREATE
     public Product addProduct(Product product) {
         // --- START BUSINESS LOGIC ---
@@ -101,5 +96,11 @@ public class ProductService {
                 product.getStockQuantity() + quantityToRestore
         );
         productRepository.save(product);
+    }
+
+    public Product getProductById(Long id) {
+        return productRepository.findById(id)
+                .orElseThrow(() ->
+                        new RuntimeException("Product not found with id: " + id));
     }
 }
