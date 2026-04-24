@@ -26,8 +26,6 @@
         <module>payment-service</module>
         <module>notification-service</module>
         <module>admin-service</module>
-        <module>web-bff</module>
-        <module>mobile-bff</module>
     </modules>
 
 </project>
