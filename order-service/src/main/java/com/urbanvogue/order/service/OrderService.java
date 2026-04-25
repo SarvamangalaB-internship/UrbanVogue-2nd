@@ -28,6 +28,9 @@ public class OrderService {
     @Value("${product.service.url}")
     private String productServiceUrl;
 
+    @Value("${notification.service.url}")
+    private String notificationServiceUrl;
+
     // ─────────────────────────────────────────
     // CREATE: Place a new order
     // ─────────────────────────────────────────
@@ -146,6 +149,20 @@ public class OrderService {
             );
         }
 
+        // ── Notify: Send order placed notification ──
+        try {
+            String notifyUrl = UriComponentsBuilder
+                    .fromHttpUrl(notificationServiceUrl + "/api/notifications/order-placed")
+                    .queryParam("username", savedOrder.getCustomerUsername())
+                    .queryParam("orderId", savedOrder.getId())
+                    .queryParam("amount", savedOrder.getTotalAmount())
+                    .toUriString();
+            restTemplate.postForObject(notifyUrl, null, Object.class);
+            System.out.println("✅ Order placed notification sent for Order #" + savedOrder.getId());
+        } catch (Exception e) {
+            System.err.println("⚠️ Could not send order placed notification: " + e.getMessage());
+        }
+
         return savedOrder;
     }
 
@@ -213,7 +230,32 @@ public class OrderService {
         }
 
         order.setStatus(newStatus.toUpperCase());
-        return orderRepository.save(order);
+        Order updatedOrder = orderRepository.save(order);
+
+        // ── Notify: Send status update notification ──
+        try {
+            String status = updatedOrder.getStatus();
+            String endpoint = null;
+            if ("SHIPPED".equals(status)) {
+                endpoint = "/api/notifications/order-shipped";
+            } else if ("DELIVERED".equals(status)) {
+                endpoint = "/api/notifications/order-delivered";
+            }
+
+            if (endpoint != null) {
+                String notifyUrl = UriComponentsBuilder
+                        .fromHttpUrl(notificationServiceUrl + endpoint)
+                        .queryParam("username", updatedOrder.getCustomerUsername())
+                        .queryParam("orderId", updatedOrder.getId())
+                        .toUriString();
+                restTemplate.postForObject(notifyUrl, null, Object.class);
+                System.out.println("Order " + status.toLowerCase() + " notification sent for Order #" + updatedOrder.getId());
+            }
+        } catch (Exception e) {
+            System.err.println("Could not send order status notification: " + e.getMessage());
+        }
+
+        return updatedOrder;
     }
 
     // ─────────────────────────────────────────
@@ -255,6 +297,20 @@ public class OrderService {
 
         order.setStatus("CANCELLED");
         orderRepository.save(order);
+
+        // ── Notify: Send order cancelled notification ──
+        try {
+            String notifyUrl = UriComponentsBuilder
+                    .fromHttpUrl(notificationServiceUrl + "/api/notifications/order-cancelled")
+                    .queryParam("username", order.getCustomerUsername())
+                    .queryParam("orderId", order.getId())
+                    .toUriString();
+            restTemplate.postForObject(notifyUrl, null, Object.class);
+            System.out.println("Order cancelled notification sent for Order #" + order.getId());
+        } catch (Exception e) {
+            System.err.println("Could not send order cancelled notification: " + e.getMessage());
+        }
+
         return "Order #" + id + " cancelled. Stock restored.";
     }
 }

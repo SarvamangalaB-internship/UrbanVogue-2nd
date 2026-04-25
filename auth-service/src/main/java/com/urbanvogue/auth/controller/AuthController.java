@@ -5,8 +5,10 @@ import com.urbanvogue.auth.repository.UserRepository;
 import com.urbanvogue.auth.service.AuthService;
 import com.urbanvogue.auth.util.JwtUtils;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.client.RestTemplate;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -23,6 +25,12 @@ public class AuthController {
     @Autowired
     private UserRepository userRepository;
 
+    @Autowired
+    private RestTemplate restTemplate;
+
+    @Value("${notification.service.url}")
+    private String notificationServiceUrl;
+
     private final BCryptPasswordEncoder passwordEncoder =
             new BCryptPasswordEncoder();
 
@@ -30,6 +38,24 @@ public class AuthController {
     @PostMapping("/register")
     public String register(@RequestBody User user) {
         authService.register(user);
+
+        // ── Notify: Send welcome email ──
+        try {
+            String notifyUrl = notificationServiceUrl +
+                    "/api/notifications/welcome?username=" +
+                    user.getUsername();
+            restTemplate.postForObject(notifyUrl, null, Object.class);
+            System.out.println(
+                    "✅ Welcome notification sent for: " +
+                            user.getUsername()
+            );
+        } catch (Exception e) {
+            System.err.println(
+                    "⚠️ Could not send welcome notification: " +
+                            e.getMessage()
+            );
+        }
+
         return "User registered successfully!";
     }
 
@@ -53,6 +79,37 @@ public class AuthController {
                 user.getUsername(),
                 user.getRole()
         );
+
+        // ── Notify: Send login notification ──
+        try {
+            String notifyUrl = notificationServiceUrl +
+                    "/api/notifications/send";
+
+            Map<String, Object> notificationBody = new HashMap<>();
+            notificationBody.put("recipientUsername",
+                    user.getUsername());
+            notificationBody.put("type", "LOGIN");
+            notificationBody.put("channel", "EMAIL");
+            notificationBody.put("message",
+                    "Hello " + user.getUsername() +
+                            "! You have successfully logged in to " +
+                            "UrbanVogue. If this wasn't you, " +
+                            "please change your password immediately."
+            );
+
+            restTemplate.postForObject(
+                    notifyUrl, notificationBody, Object.class
+            );
+            System.out.println(
+                    "✅ Login notification sent for: " +
+                            user.getUsername()
+            );
+        } catch (Exception e) {
+            System.err.println(
+                    "⚠️ Could not send login notification: " +
+                            e.getMessage()
+            );
+        }
 
         // Return token with helpful info
         Map<String, String> response = new HashMap<>();

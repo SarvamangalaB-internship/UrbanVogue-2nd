@@ -264,14 +264,14 @@ public class PaymentService {
                     "/status?newStatus=" + newStatus;
             restTemplate.put(url, null);
             System.out.println(
-                    "✅ Order #" + orderId +
+                    "Order #" + orderId +
                             " status updated to: " + newStatus
             );
         } catch (Exception e) {
             // Don't fail the payment if order update fails
             // Log it and continue
             System.err.println(
-                    "⚠️ Warning: Could not update Order #" +
+                    "Warning: Could not update Order #" +
                             orderId + " status. " + e.getMessage()
             );
         }
