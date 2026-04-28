@@ -7,9 +7,11 @@ import org.springframework.cloud.gateway.filter.factory.AbstractGatewayFilterFac
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
+import org.springframework.web.server.ServerWebExchange;
 
 @Component
-public class AuthenticationFilter extends AbstractGatewayFilterFactory<AuthenticationFilter.Config> {
+public class AuthenticationFilter extends
+        AbstractGatewayFilterFactory<AuthenticationFilter.Config> {
 
     @Autowired
     private JwtUtil jwtUtil;
@@ -21,40 +23,72 @@ public class AuthenticationFilter extends AbstractGatewayFilterFactory<Authentic
     @Override
     public GatewayFilter apply(Config config) {
         return ((exchange, chain) -> {
-            
-            // Allow public paths
-            String path = exchange.getRequest().getURI().getPath();
-            if (path.startsWith("/api/auth/register") || path.startsWith("/api/auth/login") || path.equals("/api/products") || path.startsWith("/api/users/exists/")) {
+
+            String path = exchange.getRequest()
+                    .getURI().getPath();
+
+            // ── PUBLIC PATHS — No token needed ──
+            if (isPublicPath(path)) {
                 return chain.filter(exchange);
             }
 
-            if (!exchange.getRequest().getHeaders().containsKey(HttpHeaders.AUTHORIZATION)) {
-                exchange.getResponse().setStatusCode(HttpStatus.UNAUTHORIZED);
+            // ── CHECK: Auth header present? ──
+            if (!exchange.getRequest().getHeaders()
+                    .containsKey(HttpHeaders.AUTHORIZATION)) {
+                exchange.getResponse()
+                        .setStatusCode(HttpStatus.UNAUTHORIZED);
                 return exchange.getResponse().setComplete();
             }
 
-            String authHeader = exchange.getRequest().getHeaders().get(HttpHeaders.AUTHORIZATION).get(0);
-            if (authHeader != null && authHeader.startsWith("Bearer ")) {
+            // ── EXTRACT token ──
+            String authHeader = exchange.getRequest()
+                    .getHeaders()
+                    .get(HttpHeaders.AUTHORIZATION)
+                    .get(0);
+
+            if (authHeader != null &&
+                    authHeader.startsWith("Bearer ")) {
                 authHeader = authHeader.substring(7);
             }
 
+            // ── VALIDATE and inject username ──
             try {
                 jwtUtil.validateToken(authHeader);
-                String username = jwtUtil.extractUsername(authHeader);
-                
-                // Mutate the request to add the username header
-                exchange.getRequest().mutate()
-                        .header("X-Logged-In-User", username)
+                String username =
+                        jwtUtil.extractUsername(authHeader);
+
+                // ✅ CORRECT WAY — must use exchange.mutate()
+                ServerWebExchange mutatedExchange = exchange
+                        .mutate()
+                        .request(exchange.getRequest()
+                                .mutate()
+                                .header("X-Logged-In-User",
+                                        username)
+                                .build())
                         .build();
 
+                return chain.filter(mutatedExchange);
+
             } catch (Exception e) {
-                System.out.println("Invalid token: " + e.getMessage());
-                exchange.getResponse().setStatusCode(HttpStatus.UNAUTHORIZED);
+                System.out.println(
+                        "❌ Invalid token: " + e.getMessage()
+                );
+                exchange.getResponse()
+                        .setStatusCode(HttpStatus.UNAUTHORIZED);
                 return exchange.getResponse().setComplete();
             }
-
-            return chain.filter(exchange);
         });
+    }
+
+    private boolean isPublicPath(String path) {
+        return path.startsWith("/api/auth/register") ||
+                path.startsWith("/api/auth/login") ||
+                path.startsWith("/api/products") ||
+                path.startsWith("/api/users/exists/") ||
+                path.contains("/reduce-stock") ||
+                path.contains("/restore-stock") ||
+                path.startsWith("/api/notifications/") ||
+                path.startsWith("/api/admin/");
     }
 
     public static class Config { }
