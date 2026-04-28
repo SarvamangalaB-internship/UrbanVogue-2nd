@@ -19,4 +19,9 @@ public class AuthService {
         user.setPassword(passwordEncoder.encode(user.getPassword()));
         return userRepository.save(user);
     }
+
+    public void deleteUser(String username) {
+        userRepository.findByUsername(username)
+                .ifPresent(user -> userRepository.delete(user));
+    }
 }

@@ -21,7 +21,13 @@ public class OrderController {
 
     // POST /api/orders
     @PostMapping
-    public Order placeOrder(@RequestBody OrderRequest request) {
+    public Order placeOrder(
+            @RequestHeader(value = "X-Logged-In-User", required = false) String loggedInUser,
+            @RequestBody OrderRequest request) {
+        
+        if (loggedInUser != null) {
+            request.setCustomerUsername(loggedInUser);
+        }
         return orderService.placeOrder(request);
     }
 

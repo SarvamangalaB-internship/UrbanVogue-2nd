@@ -1,5 +1,6 @@
 package com.urbanvogue.auth.controller;
 
+import com.urbanvogue.auth.dto.RegistrationRequest;
 import com.urbanvogue.auth.model.User;
 import com.urbanvogue.auth.repository.UserRepository;
 import com.urbanvogue.auth.service.AuthService;
@@ -31,93 +32,133 @@ public class AuthController {
     @Value("${notification.service.url}")
     private String notificationServiceUrl;
 
+    @Value("${user.service.url}")
+    private String userServiceUrl;
+
     private final BCryptPasswordEncoder passwordEncoder =
             new BCryptPasswordEncoder();
 
-    // ── REGISTER ──
+    // ── REGISTER (Amazon-style: One form creates both auth + profile) ──
     @PostMapping("/register")
-    public String register(@RequestBody User user) {
-        authService.register(user);
+    public Map<String, Object> register(@RequestBody RegistrationRequest request) {
+        Map<String, Object> response = new HashMap<>();
 
-        // ── Notify: Send welcome email ──
         try {
-            String notifyUrl = notificationServiceUrl +
-                    "/api/notifications/welcome?username=" +
-                    user.getUsername();
-            restTemplate.postForObject(notifyUrl, null, Object.class);
-            System.out.println(
-                    "✅ Welcome notification sent for: " +
-                            user.getUsername()
-            );
+            // 1. Create auth credentials in users table
+            User user = new User();
+            user.setUsername(request.getUsername());
+            user.setPassword(passwordEncoder.encode(request.getPassword()));
+            user.setRole(request.getRole() != null ? request.getRole() : "ROLE_USER");
+
+            User savedUser = authService.register(user);
+
+            // 2. Auto-create user profile in user-service
+            Map<String, Object> profileData = new HashMap<>();
+            profileData.put("username", request.getUsername());
+            profileData.put("fullName", request.getFullName());
+            profileData.put("age", request.getAge());
+            profileData.put("sex", request.getSex());
+            profileData.put("address", request.getAddress());
+            profileData.put("email", request.getEmail());
+
+            try {
+                String profileUrl = userServiceUrl + "/api/users";
+                restTemplate.postForObject(profileUrl, profileData, Object.class);
+                System.out.println("✅ User profile created for: " + request.getUsername());
+            } catch (Exception e) {
+                System.err.println("⚠️ Could not create user profile: " + e.getMessage());
+                // Don't fail registration if profile creation fails
+            }
+
+            // ── Notify: Send welcome email ──
+            try {
+                String notifyUrl = notificationServiceUrl +
+                        "/api/notifications/welcome?username=" +
+                        request.getUsername();
+                restTemplate.postForObject(notifyUrl, null, Object.class);
+                System.out.println("✅ Welcome notification sent for: " + request.getUsername());
+            } catch (Exception e) {
+                System.err.println("⚠️ Could not send welcome notification: " + e.getMessage());
+            }
+
+            response.put("success", true);
+            response.put("message", "Registration successful! Welcome to Urban Vogue.");
+            response.put("username", request.getUsername());
+
         } catch (Exception e) {
-            System.err.println(
-                    "⚠️ Could not send welcome notification: " +
-                            e.getMessage()
-            );
+            response.put("success", false);
+            response.put("message", "Registration failed: " + e.getMessage());
         }
 
-        return "User registered successfully!";
+        return response;
     }
 
     // ── LOGIN — Returns token + user info ──
     @PostMapping("/login")
-    public Map<String, String> login(@RequestBody User loginRequest) {
+    public Map<String, Object> login(@RequestBody User loginRequest) {
+        Map<String, Object> response = new HashMap<>();
 
-        User user = userRepository
-                .findByUsername(loginRequest.getUsername())
-                .orElseThrow(() ->
-                        new RuntimeException("User not found")
+        try {
+            User user = userRepository
+                    .findByUsername(loginRequest.getUsername())
+                    .orElseThrow(() ->
+                            new RuntimeException("User not found")
+                    );
+
+            if (!passwordEncoder.matches(
+                    loginRequest.getPassword(), user.getPassword())) {
+                throw new RuntimeException("Invalid Credentials");
+            }
+
+            // ── Generate token with username AND role ──
+            String token = jwtUtils.generateToken(
+                    user.getUsername(),
+                    user.getRole()
+            );
+
+            // ── Notify: Send login notification ──
+            try {
+                String notifyUrl = notificationServiceUrl +
+                        "/api/notifications/send";
+
+                Map<String, Object> notificationBody = new HashMap<>();
+                notificationBody.put("recipientUsername",
+                        user.getUsername());
+                notificationBody.put("type", "LOGIN");
+                notificationBody.put("channel", "EMAIL");
+                notificationBody.put("message",
+                        "Hello " + user.getUsername() +
+                                "! You have successfully logged in to " +
+                                "UrbanVogue. If this wasn't you, " +
+                                "please change your password immediately."
                 );
 
-        if (!passwordEncoder.matches(
-                loginRequest.getPassword(), user.getPassword())) {
-            throw new RuntimeException("Invalid Credentials");
-        }
+                restTemplate.postForObject(
+                        notifyUrl, notificationBody, Object.class
+                );
+                System.out.println(
+                        "✅ Login notification sent for: " +
+                                user.getUsername()
+                );
+            } catch (Exception e) {
+                System.err.println(
+                        "⚠️ Could not send login notification: " +
+                        e.getMessage()
+                );
+            }
 
-        // Generate token with username AND role
-        String token = jwtUtils.generateToken(
-                user.getUsername(),
-                user.getRole()
-        );
+            response.put("success", true);
+            response.put("token", token);
+            response.put("username", user.getUsername());
+            response.put("role", user.getRole());
+            response.put("userId", user.getId());
+            response.put("expiresIn", "72 hours");
+            response.put("message", "Login successful!");
 
-        // ── Notify: Send login notification ──
-        try {
-            String notifyUrl = notificationServiceUrl +
-                    "/api/notifications/send";
-
-            Map<String, Object> notificationBody = new HashMap<>();
-            notificationBody.put("recipientUsername",
-                    user.getUsername());
-            notificationBody.put("type", "LOGIN");
-            notificationBody.put("channel", "EMAIL");
-            notificationBody.put("message",
-                    "Hello " + user.getUsername() +
-                            "! You have successfully logged in to " +
-                            "UrbanVogue. If this wasn't you, " +
-                            "please change your password immediately."
-            );
-
-            restTemplate.postForObject(
-                    notifyUrl, notificationBody, Object.class
-            );
-            System.out.println(
-                    "✅ Login notification sent for: " +
-                            user.getUsername()
-            );
         } catch (Exception e) {
-            System.err.println(
-                    "⚠️ Could not send login notification: " +
-                            e.getMessage()
-            );
+            response.put("success", false);
+            response.put("message", e.getMessage());
         }
-
-        // Return token with helpful info
-        Map<String, String> response = new HashMap<>();
-        response.put("token", token);
-        response.put("username", user.getUsername());
-        response.put("role", user.getRole());
-        response.put("expiresIn", "72 hours");
-        response.put("message", "Login successful!");
 
         return response;
     }
@@ -153,5 +194,12 @@ public class AuthController {
         }
 
         return response;
+    }
+
+    // ── DELETE USER CREDENTIALS (Called by user-service) ──
+    @DeleteMapping("/{username}")
+    public String deleteUser(@PathVariable String username) {
+        authService.deleteUser(username);
+        return "Auth credentials deleted for " + username;
     }
 }

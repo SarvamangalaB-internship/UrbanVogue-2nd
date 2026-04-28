@@ -21,7 +21,11 @@ public class PaymentController {
     // Customer clicks "Pay Now"
     @PostMapping("/initiate")
     public PaymentResponse initiatePayment(
+            @RequestHeader(value = "X-Logged-In-User", required = false) String loggedInUser,
             @RequestBody PaymentRequest request) {
+        if (loggedInUser != null) {
+            request.setCustomerUsername(loggedInUser);
+        }
         return paymentService.initiatePayment(request);
     }
 

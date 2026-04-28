@@ -10,4 +10,5 @@ public class NotificationRequest {
     private String message;
     private String channel;  // "EMAIL" or "SMS"
     private Long referenceId; // orderId or paymentId
+
 }

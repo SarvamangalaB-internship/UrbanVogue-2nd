@@ -25,6 +25,9 @@ public class PaymentService {
     @Value("${order.service.url}")
     private String orderServiceUrl;
 
+    @Value("${cart.service.url}")
+    private String cartServiceUrl;
+
     @Value("${payment.simulation.success-rate}")
     private double successRate;
 
@@ -114,6 +117,9 @@ public class PaymentService {
             // ── STEP 6: Tell Order Service payment succeeded ──
             // Update order status to CONFIRMED
             updateOrderStatus(request.getOrderId(), "CONFIRMED");
+
+            // ── STEP 7: Clear the Cart ──
+            clearCustomerCart(request.getCustomerUsername());
 
             return new PaymentResponse(
                     saved.getId(),
@@ -274,6 +280,25 @@ public class PaymentService {
                     "Warning: Could not update Order #" +
                             orderId + " status. " + e.getMessage()
             );
+        }
+    }
+
+    // ─────────────────────────────────────────
+    // PRIVATE: Clear Cart on successful payment
+    // ─────────────────────────────────────────
+    private void clearCustomerCart(String username) {
+        if (username == null) return;
+        try {
+            String url = cartServiceUrl + "/api/cart/clear";
+            // We pass the X-Logged-In-User header just like the Gateway would
+            org.springframework.http.HttpHeaders headers = new org.springframework.http.HttpHeaders();
+            headers.set("X-Logged-In-User", username);
+            org.springframework.http.HttpEntity<String> entity = new org.springframework.http.HttpEntity<>(headers);
+            
+            restTemplate.exchange(url, org.springframework.http.HttpMethod.DELETE, entity, String.class);
+            System.out.println("Cart cleared for user: " + username);
+        } catch (Exception e) {
+            System.err.println("Warning: Could not clear cart for " + username + ". " + e.getMessage());
         }
     }
 }
