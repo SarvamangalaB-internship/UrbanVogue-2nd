@@ -29,14 +29,15 @@ public class AuthController {
     @Autowired
     private RestTemplate restTemplate;
 
+    // Fixed: Injecting the password encoder bean from SecurityConfig
+    @Autowired
+    private BCryptPasswordEncoder passwordEncoder;
+
     @Value("${notification.service.url}")
     private String notificationServiceUrl;
 
     @Value("${user.service.url}")
     private String userServiceUrl;
-
-    private final BCryptPasswordEncoder passwordEncoder =
-            new BCryptPasswordEncoder();
 
     // ── REGISTER (Amazon-style: One form creates both auth + profile) ──
     @PostMapping("/register")
@@ -47,6 +48,7 @@ public class AuthController {
             // 1. Create auth credentials in users table
             User user = new User();
             user.setUsername(request.getUsername());
+            // Encode password using the injected bean
             user.setPassword(passwordEncoder.encode(request.getPassword()));
             user.setRole(request.getRole() != null ? request.getRole() : "ROLE_USER");
 
@@ -67,7 +69,6 @@ public class AuthController {
                 System.out.println("✅ User profile created for: " + request.getUsername());
             } catch (Exception e) {
                 System.err.println("⚠️ Could not create user profile: " + e.getMessage());
-                // Don't fail registration if profile creation fails
             }
 
             // ── Notify: Send welcome email ──
@@ -76,7 +77,6 @@ public class AuthController {
                         "/api/notifications/welcome?username=" +
                         request.getUsername();
                 restTemplate.postForObject(notifyUrl, null, Object.class);
-                System.out.println("✅ Welcome notification sent for: " + request.getUsername());
             } catch (Exception e) {
                 System.err.println("⚠️ Could not send welcome notification: " + e.getMessage());
             }
@@ -99,52 +99,36 @@ public class AuthController {
         Map<String, Object> response = new HashMap<>();
 
         try {
+            // 1. Find user by username
             User user = userRepository
                     .findByUsername(loginRequest.getUsername())
-                    .orElseThrow(() ->
-                            new RuntimeException("User not found")
-                    );
+                    .orElseThrow(() -> new RuntimeException("User not found"));
 
-            if (!passwordEncoder.matches(
-                    loginRequest.getPassword(), user.getPassword())) {
+            // 2. LOGGING for debugging (Check console if login fails)
+            System.out.println("Login attempt for: " + loginRequest.getUsername());
+
+            // 3. SECURE MATCHING
+            // matches(Raw_Password, Encoded_Password_from_DB)
+            if (!passwordEncoder.matches(loginRequest.getPassword(), user.getPassword())) {
+                System.err.println("❌ Password mismatch for user: " + loginRequest.getUsername());
                 throw new RuntimeException("Invalid Credentials");
             }
 
-            // ── Generate token with username AND role ──
-            String token = jwtUtils.generateToken(
-                    user.getUsername(),
-                    user.getRole()
-            );
+            // 4. Generate JWT
+            String token = jwtUtils.generateToken(user.getUsername(), user.getRole());
 
-            // ── Notify: Send login notification ──
+            // ── Notify: Send login notification (Async-like) ──
             try {
-                String notifyUrl = notificationServiceUrl +
-                        "/api/notifications/send";
-
+                String notifyUrl = notificationServiceUrl + "/api/notifications/send";
                 Map<String, Object> notificationBody = new HashMap<>();
-                notificationBody.put("recipientUsername",
-                        user.getUsername());
+                notificationBody.put("recipientUsername", user.getUsername());
                 notificationBody.put("type", "LOGIN");
                 notificationBody.put("channel", "EMAIL");
-                notificationBody.put("message",
-                        "Hello " + user.getUsername() +
-                                "! You have successfully logged in to " +
-                                "UrbanVogue. If this wasn't you, " +
-                                "please change your password immediately."
-                );
+                notificationBody.put("message", "Hello " + user.getUsername() + "! Successful login to UrbanVogue.");
 
-                restTemplate.postForObject(
-                        notifyUrl, notificationBody, Object.class
-                );
-                System.out.println(
-                        "✅ Login notification sent for: " +
-                                user.getUsername()
-                );
+                restTemplate.postForObject(notifyUrl, notificationBody, Object.class);
             } catch (Exception e) {
-                System.err.println(
-                        "⚠️ Could not send login notification: " +
-                        e.getMessage()
-                );
+                System.err.println("⚠️ Notification failed: " + e.getMessage());
             }
 
             response.put("success", true);
@@ -152,7 +136,6 @@ public class AuthController {
             response.put("username", user.getUsername());
             response.put("role", user.getRole());
             response.put("userId", user.getId());
-            response.put("expiresIn", "72 hours");
             response.put("message", "Login successful!");
 
         } catch (Exception e) {
@@ -163,11 +146,9 @@ public class AuthController {
         return response;
     }
 
-    // ── VALIDATE — Check if token is still valid ──
+    // ── VALIDATE — Hub for Gateway and other services ──
     @PostMapping("/validate")
-    public Map<String, Object> validateToken(
-            @RequestHeader("Authorization") String authHeader) {
-
+    public Map<String, Object> validateToken(@RequestHeader("Authorization") String authHeader) {
         Map<String, Object> response = new HashMap<>();
 
         if (authHeader == null || !authHeader.startsWith("Bearer ")) {
@@ -176,27 +157,23 @@ public class AuthController {
             return response;
         }
 
-        String token = authHeader.substring(7); // Remove "Bearer "
+        String token = authHeader.substring(7);
 
         if (jwtUtils.validateToken(token)) {
             response.put("valid", true);
-            response.put("username",
-                    jwtUtils.getUsernameFromToken(token));
-            response.put("role",
-                    jwtUtils.getRoleFromToken(token));
+            response.put("username", jwtUtils.getUsernameFromToken(token));
+            response.put("role", jwtUtils.getRoleFromToken(token));
             response.put("expired", false);
-            response.put("message", "Token is valid");
         } else {
             response.put("valid", false);
             response.put("expired", true);
-            response.put("message",
-                    "Token is expired or invalid. Please login again.");
+            response.put("message", "Token is invalid.");
         }
 
         return response;
     }
 
-    // ── DELETE USER CREDENTIALS (Called by user-service) ──
+    // ── DELETE USER CREDENTIALS ──
     @DeleteMapping("/{username}")
     public String deleteUser(@PathVariable String username) {
         authService.deleteUser(username);
