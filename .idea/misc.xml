@@ -9,9 +9,11 @@
     </option>
     <option name="ignoredFiles">
       <set>
+        <option value="$PROJECT_DIR$/cart-service/pom.xml" />
         <option value="$PROJECT_DIR$/mobile-bff/pom.xml" />
         <option value="$PROJECT_DIR$/payement-service/pom.xml" />
         <option value="$PROJECT_DIR$/producr-service/pom.xml" />
+        <option value="$PROJECT_DIR$/product-service/pom.xml" />
         <option value="$PROJECT_DIR$/web-bff/pom.xml" />
       </set>
     </option>
