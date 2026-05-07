@@ -21,9 +21,12 @@ public class Notification {
     private String channel;
     private String status;
     private Long referenceId;
-
     private LocalDateTime createdAt;
     private LocalDateTime sentAt;
+
+
+
+
     public Long getId() {
         return id;
     }

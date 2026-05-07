@@ -17,7 +17,7 @@ public class NotificationService {
         this.repo = repo;
     }
 
-    // MAIN METHOD
+    // MAIN METHOD used
     public Notification sendNotification(NotificationRequest req) {
 
         if (req.getRecipientUsername() == null || req.getRecipientUsername().isEmpty()) {
@@ -74,7 +74,7 @@ public class NotificationService {
 
     public Notification welcome(String user) {
         return sendNotification(build(user, "WELCOME",
-                "Welcome " + user + " 🎉", "EMAIL", null));
+                "Welcome " + user + " ", "EMAIL", null));
     }
 
 
@@ -111,6 +111,6 @@ public class NotificationService {
     }
 
     private void print(Notification n) {
-        System.out.println("🔔 " + n.getMessage());
+        System.out.println(" " + n.getMessage());
     }
 }

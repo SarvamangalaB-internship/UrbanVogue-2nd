@@ -17,7 +17,7 @@ public class Product {
     private String category;
     private String image;
 
-    // ===== GETTERS & SETTERS =====
+    //  GETTERS & SETTERS
 
     public Long getId() {
         return id;

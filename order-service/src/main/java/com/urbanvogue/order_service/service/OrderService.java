@@ -162,7 +162,7 @@ public class OrderService {
             return "Already cancelled";
         }
 
-        //  REFUND
+        //  REFUND logic (only for UPI and successful payments)
         if ("UPI".equalsIgnoreCase(order.getPaymentMethod())
                 && "SUCCESS".equals(order.getPaymentStatus())) {
 
